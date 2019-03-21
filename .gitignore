@@ -1,104 +1,84 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
+import os
+import SimpleITK    #注意使用simpleitkz时，路径中不能有中文
+import pydicom
+import numpy as np
+import cv2
+from tqdm import tqdm
 
-# C extensions
-*.so
+def is_dicom_file(filename):
+    '''
+       判断某文件是否是dicom格式的文件
+    :param filename: dicom文件的路径
+    :return:
+    '''
+    file_stream = open(filename, 'rb')
+    file_stream.seek(128)
+    data = file_stream.read(4)
+    file_stream.close()
+    if data == b'DICM':
+        return True
+    return False
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+def load_patient(src_dir):
+    '''
+    :读取某文件夹内的所有dicom文件
+    :param src_dir: dicom文件夹路径
+    :return: dicom list
+    '''
+    files = os.listdir(src_dir)
+    slices = []
+    for s in files:
+        if is_dicom_file(src_dir + '/' + s):
+            instance = pydicom.read_file(src_dir + '/' + s)
+            slices.append(instance)
+    slices.sort(key=lambda x: int(x.InstanceNumber))
+    try:
+        slice_thickness = np.abs(slices[0].ImagePositionPatient[2] - slices[1].ImagePositionPatient[2])
+    except:
+        slice_thickness = np.abs(slices[0].SliceLocation - slices[1].SliceLocation)
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
+    for s in slices:
+        s.SliceThickness = slice_thickness
+    return slices
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-.hypothesis/
-.pytest_cache/
-
-# Translations
-*.mo
-*.pot
-
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# pyenv
-.python-version
-
-# celery beat schedule file
-celerybeat-schedule
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
+def get_pixels_hu_by_simpleitk(dicom_dir):
+    '''
+    :读取某文件夹内的所有dicom文件,并提取像素值(-4000 ~ 4000)
+    :param src_dir: dicom文件夹路径
+    :return: image array
+    '''
+    reader = SimpleITK.ImageSeriesReader()
+    dicom_names = reader.GetGDCMSeriesFileNames(dicom_dir)
+    reader.SetFileNames(dicom_names)
+    image = reader.Execute()
+    img_array = SimpleITK.GetArrayFromImage(image)
+    img_array[img_array == -2000] = 0
+    return img_array
+'''
+def normalize_hu(image):
+    
+     #:将输入图像的像素值(-4000 ~ 4000)归一化到0~1之间
+     #:param image 输入的图像数组
+     #:return: 归一化处理后的图像数组
+    
+    MIN_BOUND = -400.0
+    MAX_BOUND = 400.0
+    image = (image - MIN_BOUND) / (MAX_BOUND - MIN_BOUND)
+    image[image > 1] = 1.
+    image[image < 0] = 0.
+    return image
+'''
+if __name__ == '__main__':
+    dicom_dir = './Data/chenqingjun2014.10.07/02798483/'
+    # 读取dicom文件的元数据(dicom tags)
+    slices = load_patient(dicom_dir)
+    print('The number of dicom files : ', len(slices))
+    # 提取dicom文件中的像素值
+    image = get_pixels_hu_by_simpleitk(dicom_dir)
+    for i in tqdm(range(image.shape[0])):
+        img_path = "Data/jpg/img_" + str(i).rjust(4, '0') + "_i.jpg"
+        # 将像素值归一化到[0,1]区间
+        #org_img = normalize_hu(image[i])
+        # 保存图像数组为灰度图(.jpg)
+        #cv2.imwrite(img_path, org_img * 255)
+        cv2.imwrite(img_path,image[i])
